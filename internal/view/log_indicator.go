@@ -12,6 +12,7 @@ import (
 )
 
 const spacer = "     "
+const prettyFieldsHint = "[::b]JSON Fields:[orange::b]<Shift-J>[-::]     "
 
 // LogIndicator represents a log view indicator.
 type LogIndicator struct {
@@ -23,6 +24,7 @@ type LogIndicator struct {
 	fullScreen                 bool
 	textWrap                   bool
 	showTime                   bool
+	prettyJSON                 bool
 	allContainers              bool
 	shouldDisplayAllContainers bool
 	columnLock                 bool
@@ -38,6 +40,7 @@ func NewLogIndicator(cfg *config.Config, styles *config.Styles, allContainers bo
 		fullScreen:                 cfg.K9s.UI.DefaultsToFullScreen,
 		textWrap:                   cfg.K9s.Logger.TextWrap,
 		showTime:                   cfg.K9s.Logger.ShowTime,
+		prettyJSON:                 cfg.K9s.Logger.PrettyJSON,
 		shouldDisplayAllContainers: allContainers,
 		columnLock:                 cfg.K9s.Logger.ColumnLock,
 	}
@@ -81,6 +84,11 @@ func (l *LogIndicator) TextWrap() bool {
 	return l.textWrap
 }
 
+// PrettyJSON reports the current pretty json mode.
+func (l *LogIndicator) PrettyJSON() bool {
+	return l.prettyJSON
+}
+
 // FullScreen reports the current screen mode.
 func (l *LogIndicator) FullScreen() bool {
 	return l.fullScreen
@@ -105,6 +113,12 @@ func (l *LogIndicator) ToggleFullScreen() {
 // ToggleTextWrap toggles the wrap mode.
 func (l *LogIndicator) ToggleTextWrap() {
 	l.textWrap = !l.textWrap
+	l.Refresh()
+}
+
+// TogglePrettyJSON toggles the pretty json mode.
+func (l *LogIndicator) TogglePrettyJSON() {
+	l.prettyJSON = !l.prettyJSON
 	l.Refresh()
 }
 
@@ -169,6 +183,13 @@ func (l *LogIndicator) Refresh() {
 		l.indicator = append(l.indicator, fmt.Sprintf(toggleOnFmt, "Timestamps", spacer)...)
 	} else {
 		l.indicator = append(l.indicator, fmt.Sprintf(toggleOffFmt, "Timestamps", spacer)...)
+	}
+
+	if l.PrettyJSON() {
+		l.indicator = append(l.indicator, fmt.Sprintf(toggleOnFmt, "PrettyJSON", spacer)...)
+		l.indicator = append(l.indicator, prettyFieldsHint...)
+	} else {
+		l.indicator = append(l.indicator, fmt.Sprintf(toggleOffFmt, "PrettyJSON", spacer)...)
 	}
 
 	if l.TextWrap() {

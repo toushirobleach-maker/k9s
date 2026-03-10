@@ -18,10 +18,17 @@ func TestLogIndicatorRefresh(t *testing.T) {
 		e  string
 	}{
 		"all-containers": {
-			view.NewLogIndicator(config.NewConfig(nil), defaults, true), "[::b]AllContainers:[gray::d]Off[-::]     [::b]Autoscroll:[limegreen::b]On[-::]      [::b]ColumnLock:[gray::d]Off[-::]     [::b]FullScreen:[gray::d]Off[-::]     [::b]Timestamps:[gray::d]Off[-::]     [::b]Wrap:[gray::d]Off[-::]\n",
+			view.NewLogIndicator(config.NewConfig(nil), defaults, true), "[::b]AllContainers:[gray::d]Off[-::]     [::b]Autoscroll:[limegreen::b]On[-::]      [::b]ColumnLock:[gray::d]Off[-::]     [::b]FullScreen:[gray::d]Off[-::]     [::b]Timestamps:[limegreen::b]On[-::]      [::b]PrettyJSON:[gray::d]Off[-::]     [::b]Wrap:[gray::d]Off[-::]\n",
 		},
 		"plain": {
-			view.NewLogIndicator(config.NewConfig(nil), defaults, false), "[::b]Autoscroll:[limegreen::b]On[-::]      [::b]ColumnLock:[gray::d]Off[-::]     [::b]FullScreen:[gray::d]Off[-::]     [::b]Timestamps:[gray::d]Off[-::]     [::b]Wrap:[gray::d]Off[-::]\n",
+			view.NewLogIndicator(config.NewConfig(nil), defaults, false), "[::b]Autoscroll:[limegreen::b]On[-::]      [::b]ColumnLock:[gray::d]Off[-::]     [::b]FullScreen:[gray::d]Off[-::]     [::b]Timestamps:[limegreen::b]On[-::]      [::b]PrettyJSON:[gray::d]Off[-::]     [::b]Wrap:[gray::d]Off[-::]\n",
+		},
+		"pretty-json-hint": {
+			func() *view.LogIndicator {
+				li := view.NewLogIndicator(config.NewConfig(nil), defaults, false)
+				li.TogglePrettyJSON()
+				return li
+			}(), "[::b]Autoscroll:[limegreen::b]On[-::]      [::b]ColumnLock:[gray::d]Off[-::]     [::b]FullScreen:[gray::d]Off[-::]     [::b]Timestamps:[limegreen::b]On[-::]      [::b]PrettyJSON:[limegreen::b]On[-::]      [::b]JSON Fields:[orange::b]<Shift-J>[-::]     [::b]Wrap:[gray::d]Off[-::]\n",
 		},
 	}
 

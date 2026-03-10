@@ -39,7 +39,8 @@ k9s:
     textWrap: false
     disableAutoscroll: false
     columnLock: false
-    showTime: false
+    showTime: true
+    prettyJson: false
   thresholds:
     cpu:
       critical: 90

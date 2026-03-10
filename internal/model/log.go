@@ -4,9 +4,11 @@
 package model
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync"
 	"time"
 
@@ -51,6 +53,9 @@ type Log struct {
 	filter       string
 	lastSent     int
 	flushTimeout time.Duration
+	prettyAll    bool
+	prettyFields map[string]struct{}
+	prettyCache  map[string]struct{}
 }
 
 // NewLog returns a new model.
@@ -60,6 +65,9 @@ func NewLog(gvr *client.GVR, opts *dao.LogOptions, flushTimeout time.Duration) *
 		logOptions:   opts,
 		lines:        dao.NewLogItems(),
 		flushTimeout: flushTimeout,
+		prettyAll:    true,
+		prettyFields: make(map[string]struct{}),
+		prettyCache:  make(map[string]struct{}),
 	}
 }
 
@@ -93,6 +101,55 @@ func (l *Log) ToggleShowTimestamp(b bool) {
 	l.Refresh()
 }
 
+// TogglePrettyJSON toggles pretty JSON rendering.
+func (l *Log) TogglePrettyJSON(b bool) {
+	l.logOptions.PrettyJSON = b
+	if b {
+		l.buildPrettyCache(500)
+	} else {
+		l.mx.Lock()
+		l.prettyCache = make(map[string]struct{})
+		l.mx.Unlock()
+	}
+	l.Refresh()
+}
+
+// SetPrettyFields sets the pretty JSON field selection.
+func (l *Log) SetPrettyFields(all bool, fields map[string]struct{}) {
+	l.mx.Lock()
+	l.prettyAll = all
+	l.prettyFields = make(map[string]struct{}, len(fields))
+	for k := range fields {
+		l.prettyFields[k] = struct{}{}
+	}
+	l.mx.Unlock()
+	l.Refresh()
+}
+
+// PrettyFieldsAll reports whether all fields are selected.
+func (l *Log) PrettyFieldsAll() bool {
+	l.mx.RLock()
+	defer l.mx.RUnlock()
+	return l.prettyAll
+}
+
+// PrettyFields returns the selected pretty JSON fields.
+func (l *Log) PrettyFields() []string {
+	l.mx.RLock()
+	defer l.mx.RUnlock()
+	if l.prettyAll || len(l.prettyFields) == 0 {
+		return nil
+	}
+	return mapKeys(l.prettyFields)
+}
+
+// PrettyFieldCache returns all known JSON fields.
+func (l *Log) PrettyFieldCache() []string {
+	l.mx.RLock()
+	defer l.mx.RUnlock()
+	return mapKeys(l.prettyCache)
+}
+
 func (l *Log) Head(ctx context.Context) {
 	l.mx.Lock()
 	l.logOptions.Head = true
@@ -109,7 +166,9 @@ func (l *Log) SetSinceSeconds(ctx context.Context, i int64) {
 // Configure sets logger configuration.
 func (l *Log) Configure(opts config.Logger) {
 	l.logOptions.Lines = opts.TailCount
+	l.logOptions.BufferSize = opts.BufferSize
 	l.logOptions.SinceSeconds = opts.SinceSeconds
+	l.logOptions.PrettyJSON = opts.PrettyJSON
 }
 
 // GetPath returns resource path.
@@ -146,7 +205,7 @@ func (l *Log) Clear() {
 func (l *Log) Refresh() {
 	l.fireLogCleared()
 	ll := make([][]byte, l.lines.Len())
-	l.lines.Render(0, l.logOptions.ShowTimestamp, ll)
+	l.lines.Render(0, l.logOptions.ShowTimestamp, l.logOptions.PrettyJSON, l.prettyAll, l.prettyFields, ll)
 	l.fireLogChanged(ll)
 }
 
@@ -169,6 +228,9 @@ func (l *Log) Start(ctx context.Context) {
 // Stop terminates logging.
 func (l *Log) Stop() {
 	l.cancel()
+	l.mx.Lock()
+	l.prettyCache = make(map[string]struct{})
+	l.mx.Unlock()
 }
 
 // Set sets the log lines (for testing only!)
@@ -179,7 +241,7 @@ func (l *Log) Set(lines *dao.LogItems) {
 
 	l.fireLogCleared()
 	ll := make([][]byte, l.lines.Len())
-	l.lines.Render(0, l.logOptions.ShowTimestamp, ll)
+	l.lines.Render(0, l.logOptions.ShowTimestamp, l.logOptions.PrettyJSON, l.prettyAll, l.prettyFields, ll)
 	l.fireLogChanged(ll)
 }
 
@@ -191,7 +253,7 @@ func (l *Log) ClearFilter() {
 
 	l.fireLogCleared()
 	ll := make([][]byte, l.lines.Len())
-	l.lines.Render(0, l.logOptions.ShowTimestamp, ll)
+	l.lines.Render(0, l.logOptions.ShowTimestamp, l.logOptions.PrettyJSON, l.prettyAll, l.prettyFields, ll)
 	l.fireLogChanged(ll)
 }
 
@@ -249,7 +311,8 @@ func (l *Log) Append(line *dao.LogItem) {
 	l.mx.Lock()
 	defer l.mx.Unlock()
 	l.logOptions.SinceTime = line.GetTimestamp()
-	if l.lines.Len() < int(l.logOptions.Lines) {
+	maxLines := l.maxBufferedLinesLocked()
+	if l.lines.Len() < maxLines {
 		l.lines.Add(line)
 		return
 	}
@@ -258,6 +321,19 @@ func (l *Log) Append(line *dao.LogItem) {
 	if l.lastSent < 0 {
 		l.lastSent = 0
 	}
+}
+
+func (l *Log) maxBufferedLinesLocked() int {
+	if l.logOptions.BufferSize > 0 {
+		return l.logOptions.BufferSize
+	}
+	if l.logOptions.Lines > 0 {
+		return int(l.logOptions.Lines)
+	}
+	if l.logOptions.BufferSize > 0 {
+		return l.logOptions.BufferSize
+	}
+	return config.MaxLogThreshold
 }
 
 // Notify fires of notifications to the listeners.
@@ -290,10 +366,11 @@ func (l *Log) updateLogs(ctx context.Context, c dao.LogChan) {
 				l.fireCanceled()
 				return
 			}
+			l.collectPrettyFields(item)
 			l.Append(item)
 			var overflow bool
 			l.mx.RLock()
-			overflow = int64(l.lines.Len()-l.lastSent) > l.logOptions.Lines
+			overflow = l.lines.Len()-l.lastSent > l.maxBufferedLinesLocked()
 			l.mx.RUnlock()
 			if overflow {
 				l.Notify()
@@ -304,6 +381,61 @@ func (l *Log) updateLogs(ctx context.Context, c dao.LogChan) {
 			return
 		}
 	}
+}
+
+func (l *Log) collectPrettyFields(item *dao.LogItem) {
+	if !l.logOptions.PrettyJSON || item == nil || len(item.Bytes) == 0 {
+		return
+	}
+	payload := item.Bytes
+	if index := bytes.IndexByte(payload, ' '); index > 0 {
+		payload = payload[index+1:]
+	}
+	keys := dao.ExtractJSONKeys(payload)
+	if len(keys) == 0 {
+		return
+	}
+	l.mx.Lock()
+	for _, k := range keys {
+		l.prettyCache[k] = struct{}{}
+	}
+	l.mx.Unlock()
+}
+
+func (l *Log) buildPrettyCache(n int) {
+	items := l.lines.Last(n)
+	if len(items) == 0 {
+		return
+	}
+	cache := make(map[string]struct{})
+	for _, item := range items {
+		if item == nil || len(item.Bytes) == 0 {
+			continue
+		}
+		payload := item.Bytes
+		if index := bytes.IndexByte(payload, ' '); index > 0 {
+			payload = payload[index+1:]
+		}
+		keys := dao.ExtractJSONKeys(payload)
+		for _, k := range keys {
+			cache[k] = struct{}{}
+		}
+	}
+	l.mx.Lock()
+	l.prettyCache = cache
+	l.mx.Unlock()
+}
+
+func mapKeys(m map[string]struct{}) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // AddListener adds a new model listener.
@@ -336,7 +468,7 @@ func (l *Log) applyFilter(index int, q string) ([][]byte, error) {
 	if q == "" {
 		return nil, nil
 	}
-	matches, indices, err := l.lines.Filter(index, q, l.logOptions.ShowTimestamp)
+	matches, indices, err := l.lines.Filter(index, q, l.logOptions.ShowTimestamp, l.logOptions.PrettyJSON, l.prettyAll, l.prettyFields)
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +476,7 @@ func (l *Log) applyFilter(index int, q string) ([][]byte, error) {
 	// No filter!
 	if matches == nil {
 		ll := make([][]byte, l.lines.Len())
-		l.lines.Render(index, l.logOptions.ShowTimestamp, ll)
+		l.lines.Render(index, l.logOptions.ShowTimestamp, l.logOptions.PrettyJSON, l.prettyAll, l.prettyFields, ll)
 		return ll, nil
 	}
 	// Blank filter
@@ -353,7 +485,7 @@ func (l *Log) applyFilter(index int, q string) ([][]byte, error) {
 	}
 	filtered := make([][]byte, 0, len(matches))
 	ll := make([][]byte, l.lines.Len())
-	l.lines.Lines(index, l.logOptions.ShowTimestamp, ll)
+	l.lines.Lines(index, l.logOptions.ShowTimestamp, l.logOptions.PrettyJSON, l.prettyAll, l.prettyFields, ll)
 	for i, idx := range matches {
 		filtered = append(filtered, color.Highlight(ll[idx], indices[i], 209))
 	}
@@ -364,7 +496,7 @@ func (l *Log) applyFilter(index int, q string) ([][]byte, error) {
 func (l *Log) fireLogBuffChanged(index int) {
 	ll := make([][]byte, l.lines.Len()-index)
 	if l.filter == "" {
-		l.lines.Render(index, l.logOptions.ShowTimestamp, ll)
+		l.lines.Render(index, l.logOptions.ShowTimestamp, l.logOptions.PrettyJSON, l.prettyAll, l.prettyFields, ll)
 	} else {
 		ff, err := l.applyFilter(index, l.filter)
 		if err != nil {

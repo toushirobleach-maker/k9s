@@ -33,7 +33,7 @@ func TestLog(t *testing.T) {
 	ii := dao.NewLogItems()
 	ii.Add(dao.NewLogItemFromString("blee\n"), dao.NewLogItemFromString("bozo\n"))
 	ll := make([][]byte, ii.Len())
-	ii.Lines(0, false, ll)
+	ii.Lines(0, false, false, true, nil, ll)
 	v.Flush(ll)
 
 	assert.Equal(t, "Waiting for logs...\nblee\nbozo\n", v.Logs().GetText(true))
@@ -53,7 +53,7 @@ func TestLogFlush(t *testing.T) {
 		dao.NewLogItemFromString("\033[0;32mBozo\n"),
 	)
 	ll := make([][]byte, items.Len())
-	items.Lines(0, false, ll)
+	items.Lines(0, false, false, true, nil, ll)
 	v.Flush(ll)
 
 	assert.Equal(t, "[orange::d]Waiting for logs...\n[black::]blee\n[green::]Bozo\n\n", v.Logs().GetText(false))
@@ -74,7 +74,7 @@ func BenchmarkLogFlush(b *testing.B) {
 		dao.NewLogItemFromString("\033[0;101mBozo\n"),
 	)
 	ll := make([][]byte, items.Len())
-	items.Lines(0, false, ll)
+	items.Lines(0, false, false, true, nil, ll)
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -109,7 +109,7 @@ func TestLogViewSave(t *testing.T) {
 	ii := dao.NewLogItems()
 	ii.Add(dao.NewLogItemFromString("blee"), dao.NewLogItemFromString("bozo"))
 	ll := make([][]byte, ii.Len())
-	ii.Lines(0, false, ll)
+	ii.Lines(0, false, false, true, nil, ll)
 	v.Flush(ll)
 
 	dd := "/tmp/test-dumps/na"
@@ -146,6 +146,23 @@ func TestAllContainerKeyBinding(t *testing.T) {
 			assert.Equal(t, u.e, got)
 		})
 	}
+}
+
+func TestPrettyJSONFieldBinding(t *testing.T) {
+	v := view.NewLog(client.PodGVR, &dao.LogOptions{
+		Path:      "fred/p1",
+		Container: "blee",
+	})
+	require.NoError(t, v.Init(makeContext(t)))
+
+	_, ok := v.Logs().Actions().Get(ui.KeyShiftJ)
+	assert.False(t, ok)
+
+	v.SendKeys(ui.KeyJ)
+
+	_, ok = v.Logs().Actions().Get(ui.KeyShiftJ)
+	assert.True(t, ok)
+	assert.Contains(t, v.Indicator().GetText(true), "JSON Fields:<Shift-J>")
 }
 
 // ----------------------------------------------------------------------------

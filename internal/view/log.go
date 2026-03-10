@@ -22,6 +22,7 @@ import (
 	"github.com/derailed/k9s/internal/model"
 	"github.com/derailed/k9s/internal/slogs"
 	"github.com/derailed/k9s/internal/ui"
+	"github.com/derailed/k9s/internal/ui/dialog"
 	"github.com/derailed/k9s/internal/view/cmd"
 	"github.com/derailed/tcell/v2"
 	"github.com/derailed/tview"
@@ -43,6 +44,8 @@ type Log struct {
 	app               *App
 	logs              *Logger
 	indicator         *LogIndicator
+	fieldsInfo        *tview.TextView
+	fieldsVisible     bool
 	ansiWriter        io.Writer
 	model             *model.Log
 	cancelFn          context.CancelFunc
@@ -84,6 +87,11 @@ func (l *Log) Init(ctx context.Context) (err error) {
 	}
 	l.indicator.Refresh()
 
+	l.fieldsInfo = tview.NewTextView()
+	l.fieldsInfo.SetDynamicColors(true)
+	l.fieldsInfo.SetWrap(false)
+	l.fieldsInfo.SetTextAlign(tview.AlignCenter)
+
 	l.logs = NewLogger(l.app)
 	if e := l.logs.Init(ctx); e != nil {
 		return e
@@ -96,6 +104,7 @@ func (l *Log) Init(ctx context.Context) (err error) {
 	l.ansiWriter = tview.ANSIWriter(l.logs, l.app.Styles.Views().Log.FgColor.String(), l.app.Styles.Views().Log.BgColor.String())
 	l.AddItem(l.logs, 0, 1, true)
 	l.bindKeys()
+	l.updatePrettyFieldAction()
 
 	l.StylesChanged(l.app.Styles)
 	l.toggleFullScreen()
@@ -107,6 +116,8 @@ func (l *Log) Init(ctx context.Context) (err error) {
 	l.columnLock = l.app.Config.K9s.Logger.ColumnLock
 
 	l.model.ToggleShowTimestamp(l.app.Config.K9s.Logger.ShowTime)
+	l.model.TogglePrettyJSON(l.app.Config.K9s.Logger.PrettyJSON)
+	l.updateFieldIndicator()
 
 	return nil
 }
@@ -188,6 +199,10 @@ func (l *Log) StylesChanged(s *config.Styles) {
 	l.SetBackgroundColor(s.Views().Log.BgColor.Color())
 	l.logs.SetTextColor(s.Views().Log.FgColor.Color())
 	l.logs.SetBackgroundColor(s.Views().Log.BgColor.Color())
+	if l.fieldsInfo != nil {
+		l.fieldsInfo.SetTextColor(s.Views().Log.FgColor.Color())
+		l.fieldsInfo.SetBackgroundColor(s.Views().Log.BgColor.Color())
+	}
 }
 
 // GetModel returns the log model.
@@ -263,6 +278,7 @@ func (l *Log) bindKeys() {
 		ui.KeyShiftL:    ui.NewKeyAction("Toggle ColumnLock", l.toggleColumnLockCmd, true),
 		ui.KeyF:         ui.NewKeyAction("Toggle FullScreen", l.toggleFullScreenCmd, true),
 		ui.KeyT:         ui.NewKeyAction("Toggle Timestamp", l.toggleTimestampCmd, true),
+		ui.KeyJ:         ui.NewKeyAction("Toggle PrettyJSON", l.togglePrettyJSONCmd, true),
 		ui.KeyW:         ui.NewKeyAction("Toggle Wrap", l.toggleTextWrapCmd, true),
 		tcell.KeyCtrlS:  ui.NewKeyAction("Save", l.SaveCmd, true),
 		ui.KeyC:         ui.NewKeyAction("Copy", cpCmd(l.app.Flash(), l.logs.TextView), true),
@@ -500,6 +516,88 @@ func (l *Log) toggleTextWrapCmd(evt *tcell.EventKey) *tcell.EventKey {
 	l.indicator.Refresh()
 
 	return nil
+}
+
+func (l *Log) togglePrettyJSONCmd(evt *tcell.EventKey) *tcell.EventKey {
+	if l.app.InCmdMode() {
+		return evt
+	}
+
+	l.indicator.TogglePrettyJSON()
+	l.model.TogglePrettyJSON(l.indicator.PrettyJSON())
+	l.indicator.Refresh()
+	l.updatePrettyFieldAction()
+	l.updateFieldIndicator()
+
+	return nil
+}
+
+func (l *Log) selectPrettyFieldsCmd(evt *tcell.EventKey) *tcell.EventKey {
+	if l.app.InCmdMode() || !l.indicator.PrettyJSON() {
+		return evt
+	}
+
+	fields := l.model.PrettyFieldCache()
+	if len(fields) == 0 {
+		l.app.Flash().Warn("No JSON fields found")
+		return nil
+	}
+
+	selected := make(map[string]struct{})
+	if !l.model.PrettyFieldsAll() {
+		for _, f := range l.model.PrettyFields() {
+			selected[f] = struct{}{}
+		}
+	}
+
+	d := l.app.Styles.Dialog()
+	restoreFocus := func() {
+		l.app.SetFocus(l.logs)
+	}
+	dialog.ShowJSONFields(&d, l.app.Content.Pages, "JSON Fields", fields, selected, l.model.PrettyFieldsAll(), func(all bool, sel map[string]struct{}) {
+		l.model.SetPrettyFields(all, sel)
+		l.updateFieldIndicator()
+		restoreFocus()
+	}, restoreFocus)
+
+	return nil
+}
+
+func (l *Log) updatePrettyFieldAction() {
+	if l.indicator.PrettyJSON() {
+		l.logs.Actions().Add(ui.KeyShiftJ, ui.NewKeyAction("Select JSON Fields", l.selectPrettyFieldsCmd, true))
+		l.indicator.Refresh()
+		return
+	}
+	l.logs.Actions().Delete(ui.KeyShiftJ)
+	l.indicator.Refresh()
+}
+
+func (l *Log) updateFieldIndicator() {
+	if !l.indicator.PrettyJSON() || l.model.PrettyFieldsAll() {
+		if l.fieldsVisible {
+			l.RemoveItem(l.fieldsInfo)
+			l.fieldsVisible = false
+		}
+		return
+	}
+
+	fields := l.model.PrettyFields()
+	label := "Chosen JSON Fields: "
+	if len(fields) == 0 {
+		label += "<none>"
+	} else {
+		colored := make([]string, 0, len(fields))
+		for _, field := range fields {
+			colored = append(colored, fmt.Sprintf("[aqua::b]%s[-::-]", field))
+		}
+		label += strings.Join(colored, ", ")
+	}
+	l.fieldsInfo.SetText(label)
+	if !l.fieldsVisible {
+		l.AddItemAtIndex(1, l.fieldsInfo, 1, 1, false)
+		l.fieldsVisible = true
+	}
 }
 
 // ToggleAutoScrollCmd toggles autoscroll status.

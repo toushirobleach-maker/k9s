@@ -23,6 +23,7 @@ type Logger struct {
 	DisableAutoscroll bool  `json:"disableAutoscroll" yaml:"disableAutoscroll"`
 	ColumnLock        bool  `json:"columnLock" yaml:"columnLock"`
 	ShowTime          bool  `json:"showTime" yaml:"showTime"`
+	PrettyJSON        bool  `json:"prettyJson" yaml:"prettyJson"`
 }
 
 // NewLogger returns a new instance.
@@ -31,6 +32,7 @@ func NewLogger() Logger {
 		TailCount:    DefaultLoggerTailCount,
 		BufferSize:   MaxLogThreshold,
 		SinceSeconds: DefaultSinceSeconds,
+		ShowTime:     true,
 	}
 }
 

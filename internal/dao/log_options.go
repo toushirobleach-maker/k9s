@@ -12,6 +12,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+const (
+	headLogLimitBytes       int64 = 4 * 1024 * 1024
+	initialTailFetchCap     int64 = 2_000
+)
+
 // LogOptions represents logger options.
 type LogOptions struct {
 	CreateDuration   time.Duration
@@ -20,6 +25,7 @@ type LogOptions struct {
 	DefaultContainer string
 	SinceTime        string
 	Lines            int64
+	BufferSize       int
 	SinceSeconds     int64
 	Head             bool
 	Previous         bool
@@ -27,6 +33,7 @@ type LogOptions struct {
 	MultiPods        bool
 	ShowTimestamp    bool
 	AllContainers    bool
+	PrettyJSON       bool
 }
 
 // Info returns the option pod and container info.
@@ -45,6 +52,7 @@ func (o *LogOptions) Clone() *LogOptions {
 		Container:        o.Container,
 		DefaultContainer: o.DefaultContainer,
 		Lines:            o.Lines,
+		BufferSize:       o.BufferSize,
 		Previous:         o.Previous,
 		Head:             o.Head,
 		SingleContainer:  o.SingleContainer,
@@ -53,6 +61,7 @@ func (o *LogOptions) Clone() *LogOptions {
 		SinceTime:        o.SinceTime,
 		SinceSeconds:     o.SinceSeconds,
 		AllContainers:    o.AllContainers,
+		PrettyJSON:       o.PrettyJSON,
 	}
 }
 
@@ -79,17 +88,27 @@ func (o *LogOptions) ToggleAllContainers() {
 
 // ToPodLogOptions returns pod log options.
 func (o *LogOptions) ToPodLogOptions() *v1.PodLogOptions {
+	tailLines := o.Lines
+	if o.BufferSize > 0 {
+		bufferTail := int64(o.BufferSize)
+		if bufferTail > initialTailFetchCap {
+			bufferTail = initialTailFetchCap
+		}
+		if bufferTail > tailLines {
+			tailLines = bufferTail
+		}
+	}
 	opts := v1.PodLogOptions{
 		Follow:     true,
 		Timestamps: true,
 		Container:  o.Container,
 		Previous:   o.Previous,
-		TailLines:  &o.Lines,
+		TailLines:  &tailLines,
 	}
 	if o.Head {
-		var maxBytes int64 = 5000
 		opts.Follow = false
 		opts.TailLines, opts.SinceSeconds, opts.SinceTime = nil, nil, nil
+		maxBytes := headLogLimitBytes
 		opts.LimitBytes = &maxBytes
 		return &opts
 	}

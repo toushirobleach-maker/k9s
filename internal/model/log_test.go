@@ -162,7 +162,7 @@ func TestLogBasic(t *testing.T) {
 	assert.Equal(t, 1, v.clearCalled)
 	assert.Equal(t, 0, v.errCalled)
 	ll := make([][]byte, data.Len())
-	data.Lines(0, false, ll)
+	data.Lines(0, false, false, true, nil, ll)
 	assert.Equal(t, ll, v.data)
 }
 
@@ -176,7 +176,7 @@ func TestLogAppend(t *testing.T) {
 	items.Add(dao.NewLogItemFromString("blah blah"))
 	m.Set(items)
 	ll := make([][]byte, items.Len())
-	items.Lines(0, false, ll)
+	items.Lines(0, false, false, true, nil, ll)
 	assert.Equal(t, ll, v.data)
 
 	data := dao.NewLogItems()
@@ -189,7 +189,7 @@ func TestLogAppend(t *testing.T) {
 	}
 	assert.Equal(t, 1, v.dataCalled)
 	ll = make([][]byte, items.Len())
-	items.Lines(0, false, ll)
+	items.Lines(0, false, false, true, nil, ll)
 	assert.Equal(t, ll, v.data)
 
 	m.Notify()
@@ -237,6 +237,76 @@ func TestToggleAllContainers(t *testing.T) {
 	assert.Empty(t, m.GetContainer())
 	m.ToggleAllContainers(ctx)
 	assert.Equal(t, "blee", m.GetContainer())
+}
+
+func TestToggleAllContainersPreservesPrettyFields(t *testing.T) {
+	opts := makeLogOpts(1)
+	opts.DefaultContainer = "duh"
+	m := model.NewLog(client.NewGVR(""), opts, 10*time.Millisecond)
+	m.Init(makeFactory())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m.TogglePrettyJSON(true)
+	m.SetPrettyFields(false, map[string]struct{}{"message": {}, "level": {}})
+
+	m.ToggleAllContainers(ctx)
+
+	assert.False(t, m.PrettyFieldsAll())
+	assert.Equal(t, []string{"level", "message"}, m.PrettyFields())
+}
+
+func TestHeadPreservesPrettyFields(t *testing.T) {
+	m := model.NewLog(client.NewGVR("fred"), makeLogOpts(1), 10*time.Millisecond)
+	m.Init(makeFactory())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m.TogglePrettyJSON(true)
+	m.SetPrettyFields(false, map[string]struct{}{"message": {}, "level": {}})
+
+	m.Head(ctx)
+
+	assert.True(t, m.IsHead())
+	assert.False(t, m.PrettyFieldsAll())
+	assert.Equal(t, []string{"level", "message"}, m.PrettyFields())
+}
+
+func TestHeadUsesBufferSizeInsteadOfTailCount(t *testing.T) {
+	opts := makeLogOpts(2)
+	opts.BufferSize = 5
+	opts.Head = true
+	m := model.NewLog(client.NewGVR("fred"), opts, 10*time.Millisecond)
+	m.Init(makeFactory())
+	v := newTestView()
+	m.AddListener(v)
+
+	for i := range 5 {
+		m.Append(dao.NewLogItemFromString(fmt.Sprintf("line-%d", i)))
+	}
+	m.Notify()
+
+	assert.Len(t, v.data, 5)
+	assert.Equal(t, "line-0", string(v.data[0]))
+	assert.Equal(t, "line-4", string(v.data[4]))
+}
+
+func TestTailUsesBufferSizeInsteadOfTailCount(t *testing.T) {
+	opts := makeLogOpts(2)
+	opts.BufferSize = 5
+	m := model.NewLog(client.NewGVR("fred"), opts, 10*time.Millisecond)
+	m.Init(makeFactory())
+	v := newTestView()
+	m.AddListener(v)
+
+	for i := range 5 {
+		m.Append(dao.NewLogItemFromString(fmt.Sprintf("line-%d", i)))
+	}
+	m.Notify()
+
+	assert.Len(t, v.data, 5)
+	assert.Equal(t, "line-0", string(v.data[0]))
+	assert.Equal(t, "line-4", string(v.data[4]))
 }
 
 // ----------------------------------------------------------------------------

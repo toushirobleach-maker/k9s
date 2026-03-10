@@ -44,3 +44,52 @@ func TestLogOptionsToggleAllContainers(t *testing.T) {
 		})
 	}
 }
+
+func TestLogOptionsToPodLogOptionsHead(t *testing.T) {
+	opts := dao.LogOptions{
+		Container:  "blee",
+		Lines:      100,
+		BufferSize: 5000,
+		Head:       true,
+	}
+
+	got := opts.ToPodLogOptions()
+
+	assert.False(t, got.Follow)
+	assert.Nil(t, got.TailLines)
+	assert.Nil(t, got.SinceSeconds)
+	assert.Nil(t, got.SinceTime)
+	if assert.NotNil(t, got.LimitBytes) {
+		assert.EqualValues(t, 4*1024*1024, *got.LimitBytes)
+	}
+}
+
+func TestLogOptionsToPodLogOptionsTailUsesCappedInitialBuffer(t *testing.T) {
+	opts := dao.LogOptions{
+		Container:  "blee",
+		Lines:      100,
+		BufferSize: 5000,
+	}
+
+	got := opts.ToPodLogOptions()
+
+	assert.True(t, got.Follow)
+	if assert.NotNil(t, got.TailLines) {
+		assert.EqualValues(t, 2000, *got.TailLines)
+	}
+}
+
+func TestLogOptionsToPodLogOptionsTailHonorsHigherExplicitTailCount(t *testing.T) {
+	opts := dao.LogOptions{
+		Container:  "blee",
+		Lines:      2500,
+		BufferSize: 5000,
+	}
+
+	got := opts.ToPodLogOptions()
+
+	assert.True(t, got.Follow)
+	if assert.NotNil(t, got.TailLines) {
+		assert.EqualValues(t, 2500, *got.TailLines)
+	}
+}

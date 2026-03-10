@@ -4,6 +4,7 @@ k9s:
   logger:
     tail: 200
     buffer: 2000
+    prettyJson: false
   currentContext: minikube
   currentCluster: minikube
   clusters:

@@ -113,6 +113,7 @@ func (c *Container) logOptions(prev bool) (*dao.LogOptions, error) {
 		Path:            c.GetTable().Path,
 		Container:       path,
 		Lines:           cfg.TailCount,
+		BufferSize:      cfg.BufferSize,
 		SinceSeconds:    cfg.SinceSeconds,
 		SingleContainer: true,
 		ShowTimestamp:   cfg.ShowTime,

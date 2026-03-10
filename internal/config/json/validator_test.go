@@ -67,6 +67,9 @@ func TestValidatePluginDir(t *testing.T) {
 		if e.IsDir() {
 			continue
 		}
+		if e.Name() != "" && e.Name()[0] == '.' {
+			continue
+		}
 		ext := filepath.Ext(e.Name())
 		if ext == ".md" {
 			continue
@@ -88,6 +91,9 @@ func TestValidateSkinDir(t *testing.T) {
 	p := json.NewValidator()
 	for _, e := range ee {
 		if e.IsDir() {
+			continue
+		}
+		if e.Name() != "" && e.Name()[0] == '.' {
 			continue
 		}
 		ext := filepath.Ext(e.Name())

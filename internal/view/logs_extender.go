@@ -84,6 +84,7 @@ func (l *LogsExtender) buildLogOpts(path, co string, prevLogs bool) *dao.LogOpti
 		Path:          path,
 		Container:     co,
 		Lines:         cfg.TailCount,
+		BufferSize:    cfg.BufferSize,
 		Previous:      prevLogs,
 		ShowTimestamp: cfg.ShowTime,
 	}
@@ -101,6 +102,7 @@ func podLogOptions(app *App, fqn string, prev bool, m *metav1.ObjectMeta, spec *
 		opts = dao.LogOptions{
 			Path:            fqn,
 			Lines:           cfg.TailCount,
+			BufferSize:      cfg.BufferSize,
 			SinceSeconds:    cfg.SinceSeconds,
 			SingleContainer: len(cc) == 1,
 			ShowTimestamp:   cfg.ShowTime,

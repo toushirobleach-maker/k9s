@@ -296,9 +296,10 @@ func (x *Xray) showLogs(spec *xray.NodeSpec, prev bool) {
 	}
 
 	opts := dao.LogOptions{
-		Path:      path,
-		Container: co,
-		Previous:  prev,
+		Path:       path,
+		Container:  co,
+		BufferSize: x.app.Config.K9s.Logger.BufferSize,
+		Previous:   prev,
 	}
 	if err := x.app.inject(NewLog(client.PodGVR, &opts), false); err != nil {
 		x.app.Flash().Err(err)

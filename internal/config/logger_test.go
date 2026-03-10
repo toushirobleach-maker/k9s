@@ -16,6 +16,7 @@ func TestNewLogger(t *testing.T) {
 
 	assert.Equal(t, int64(100), l.TailCount)
 	assert.Equal(t, 5000, l.BufferSize)
+	assert.True(t, l.ShowTime)
 }
 
 func TestLoggerValidate(t *testing.T) {
